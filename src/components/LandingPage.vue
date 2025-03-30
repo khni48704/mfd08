@@ -1,130 +1,159 @@
 <script setup>
-import { ref, onMounted } from 'vue';
-import { createEntry, getEntries, updateEntry, deleteEntry } from '@/configs/firebase';
-import { auth } from '@/configs/firebase';
+import { ref, onMounted } from "vue";
+import { auth, db } from "@/configs/firebase";
+import { doc, getDoc, getDocs, collection, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp } from "firebase/firestore";
 
-const entries = ref([]);
-const newTitle = ref('');
-const newContent = ref('');
+const userData = ref(null);
 const user = ref(null);
+const entries = ref([]);
+const newTitle = ref("");
+const newContent = ref("");
 
-onMounted(() => {
-  auth.onAuthStateChanged((currentUser) => {
-    user.value = currentUser;
-    if (user.value) {
-      fetchEntries();
+const fetchUserData = async () => {
+  user.value = auth.currentUser;
+  if (!user.value) {
+    console.log("Ingen bruger er logget ind");
+    return;
+  }
+
+  console.log("Brugerens UID:", user.value.uid);
+
+  try {
+    const userDocRef = doc(db, "users", user.value.uid);
+    const userDoc = await getDoc(userDocRef);
+
+    if (userDoc.exists()) {
+      userData.value = userDoc.data();
+      console.log("Brugerdata hentet:", userData.value);
+    } else {
+      console.error("Ingen brugerdata fundet!");
     }
-  });
-});
 
-// Hent journal entries for den nuværende bruger
+    fetchEntries();
+  } catch (error) {
+    console.error("Fejl ved hentning af brugerdata:", error);
+  }
+};
+
 const fetchEntries = async () => {
-  if (user.value) {
-    try {
-      const fetchedEntries = await getEntries(user.value.uid); 
-      if (Array.isArray(fetchedEntries)) {
-        entries.value = fetchedEntries.map(entry => {
-          return {
-            ...entry,
-            creationTime: entry.creationTime.toDate(),
-            updatedTime: entry.updatedTime?.toDate() || null,
-          };
-        });
-      } else {
-        console.error("Fetched entries er ikke et array:", fetchedEntries);
-      }
-    } catch (error) {
-      console.error("Fejl ved hentning af journal entries:", error);
-    }
-  } else {
-    alert("Du skal være logget ind for at se dine journal entries.");
+  if (!user.value) return;
+
+  try {
+    console.log("Henter journal entries for UID:", user.value.uid);
+
+    const entriesQuery = query(collection(db, "entries"), where("userId", "==", user.value.uid));
+    const querySnapshot = await getDocs(entriesQuery);
+
+    entries.value = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      creationTime: doc.data().creationTime?.toDate(),
+      updatedTime: doc.data().updatedTime?.toDate() || null,
+    }));
+
+    console.log("Journal entries hentet:", entries.value);
+  } catch (error) {
+    console.error("Fejl ved hentning af entries:", error);
   }
 };
 
-// Opret journal entry
-const handleCreate = async () => {
-  if (newTitle.value && newContent.value) {
-    try {
-      await createEntry(newTitle.value, newContent.value);
-      alert('Journal entry oprettet!');
-      newTitle.value = '';
-      newContent.value = '';
-      await fetchEntries();
-    } catch (error) {
-      console.error('Fejl ved oprettelse af journal entry: ', error);
-      alert('Der opstod en fejl ved oprettelsen af journal entry.');
-    }
-  } else {
-    alert("Udfyld venligst både titel og indhold.");
+const createEntry = async () => {
+  if (!newTitle.value || !newContent.value || !user.value) {
+    alert("Udfyld titel og indhold!");
+    return;
+  }
+
+  try {
+    await addDoc(collection(db, "entries"), {
+      title: newTitle.value,
+      content: newContent.value,
+      userId: user.value.uid,
+      creationTime: serverTimestamp(),
+      updatedTime: null,
+    });
+
+    newTitle.value = "";
+    newContent.value = "";
+    fetchEntries();
+  } catch (error) {
+    console.error("Fejl ved oprettelse af entry:", error);
+    alert("Kunne ikke oprette journal entry.");
   }
 };
 
-// Rediger journal entry
-const handleEdit = async (id, title, content) => {
-  const updatedTitle = prompt("Rediger titel:", title);
-  const updatedContent = prompt("Rediger indhold:", content);
-  
-  if (updatedTitle !== null && updatedContent !== null) {
-    await updateEntry(id, updatedTitle, updatedContent);
-    alert("Journal entry opdateret!");
-    await fetchEntries();
+const editEntry = async (entry) => {
+  const updatedTitle = prompt("Rediger titel:", entry.title);
+  const updatedContent = prompt("Rediger indhold:", entry.content);
+  if (updatedTitle === null || updatedContent === null) return;
+
+  try {
+    const entryRef = doc(db, "entries", entry.id);
+    await updateDoc(entryRef, {
+      title: updatedTitle,
+      content: updatedContent,
+      updatedTime: serverTimestamp(),
+    });
+
+    fetchEntries();
+  } catch (error) {
+    console.error("Fejl ved opdatering:", error);
+    alert("Kunne ikke opdatere entry.");
   }
 };
 
-// Slet journal entry
-const handleDelete = async (id) => {
-  if (confirm("Er du sikker på, at du vil slette denne journal entry?")) {
-    await deleteEntry(id);
-    alert("Journal entry slettet!");
-    await fetchEntries();
+
+const deleteEntry = async (entryId) => {
+  if (!confirm("Er du sikker på, at du vil slette denne entry?")) return;
+
+  try {
+    await deleteDoc(doc(db, "entries", entryId));
+    fetchEntries();
+  } catch (error) {
+    console.error("Fejl ved sletning:", error);
+    alert("Kunne ikke slette entry.");
   }
 };
+
+onMounted(fetchUserData);
 </script>
 
 <template>
-  <div class="landing-page">
-    <h1>Landing Page - Journal Entries</h1>
+  <div class="content">
+    <h1>Velkommen til LandingPage</h1>
+    <p v-if="userData">Du er logget ind som: {{ userData.email }}</p>
+    <p v-else>Indlæser brugerdata...</p>
 
-    <!-- Opret Journal Entry -->
     <div class="create-entry">
+      <h2>Opret ny Journal Entry</h2>
       <input v-model="newTitle" placeholder="Titel" class="input-field" />
       <textarea v-model="newContent" placeholder="Indhold" class="input-field"></textarea>
-      <button @click="handleCreate" class="create-button">Opret Journal Entry</button>
+      <button @click="createEntry" class="create-button">Opret Journal Entry</button>
     </div>
 
-    <!-- Liste af journal entries -->
     <div v-if="entries.length > 0" class="entries-list">
       <h2>Mine Journal Entries</h2>
       <ul>
         <li v-for="entry in entries" :key="entry.id" class="entry-item">
           <h3>{{ entry.title }}</h3>
           <p>{{ entry.content }}</p>
-
-          <!-- Kontrollér om creationTime og updatedTime er Timestamps og konverter dem -->
-          <p><strong>Oprettet:</strong> 
-            {{ entry.creationTime instanceof Date ? entry.creationTime.toLocaleString() : 'Invalid Date' }}
-          </p>
-          <p><strong>Sidst opdateret:</strong> 
-            {{ entry.updatedTime instanceof Date ? entry.updatedTime.toLocaleString() : 'Ingen opdatering' }}
-          </p>
+          <p><strong>Oprettet:</strong> {{ entry.creationTime ? entry.creationTime.toLocaleString() : "Ukendt" }}</p>
+          <p><strong>Sidst opdateret:</strong> {{ entry.updatedTime ? entry.updatedTime.toLocaleString() : "Ingen opdatering" }}</p>
 
           <div class="entry-actions">
-            <button @click="handleEdit(entry.id, entry.title, entry.content)" class="edit-button">Rediger</button>
-            <button @click="handleDelete(entry.id)" class="delete-button">Slet</button>
+            <button @click="editEntry(entry)" class="edit-button">Rediger</button>
+            <button @click="deleteEntry(entry.id)" class="delete-button">Slet</button>
           </div>
         </li>
       </ul>
     </div>
 
-    <!-- Hvis der ikke er nogen entries -->
     <div v-else class="no-entries">
-      <p>Der er endnu ingen journal entries.</p>
+      <p>Du har ingen journal entries endnu.</p>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Styling for input og textarea */
 .input-field {
   width: 100%;
   margin-bottom: 10px;
@@ -142,7 +171,6 @@ const handleDelete = async (id) => {
   background-color: #f1f1f1;
 }
 
-/* Styling for knapper */
 button {
   background-color: #4CAF50;
   color: white;
@@ -157,12 +185,10 @@ button:hover {
   background-color: #45a049;
 }
 
-/* Styling for oprettelsesfeltet */
 .create-entry {
   margin-bottom: 30px;
 }
 
-/* Styling for liste af journal entries */
 .entries-list {
   margin-top: 20px;
 }
@@ -202,7 +228,6 @@ button:hover {
   background-color: #e74c3c;
 }
 
-/* Styling for tilfælde, når der ikke er nogen entries */
 .no-entries {
   text-align: center;
   color: #888;

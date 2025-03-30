@@ -1,35 +1,38 @@
 <script setup>
-import { ref } from 'vue';
-import { auth, db, createUserWithEmailAndPassword, doc, setDoc } from '@/configs/firebase';
-import { useRouter } from 'vue-router';
+import { ref } from "vue";
+import { auth, db } from "@/configs/firebase";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
+import { useRouter } from "vue-router";
 
-const email = ref('');
-const password = ref('');
-const confirmPassword = ref('');
+const email = ref("");
+const password = ref("");
+const confirmPassword = ref("");
 const router = useRouter();
 
 const handleRegister = async () => {
-  console.log("Registrering med email:", email.value);
-  console.log("Adgangskode:", password.value);
-  
   if (password.value !== confirmPassword.value) {
     alert("Adgangskoderne stemmer ikke overens.");
     return;
   }
 
   try {
+    console.log("Starter brugeroprettelse...");
     const userCredential = await createUserWithEmailAndPassword(auth, email.value, password.value);
     const user = userCredential.user;
-    
-    console.log("Bruger oprettet:", user);
+
+    console.log("Bruger oprettet:", user.uid);
 
     await setDoc(doc(db, "users", user.uid), {
+      uid: user.uid,
       email: email.value,
       createdAt: new Date(),
     });
 
+    console.log("Brugerdata gemt i Firestore");
+
     alert("Bruger oprettet!");
-    router.push('/LandingPage');
+    router.push("/LandingPage");
   } catch (error) {
     console.error("Fejl ved registrering:", error);
     alert("Fejl: " + error.message);
@@ -37,11 +40,9 @@ const handleRegister = async () => {
 };
 
 const goToLogin = () => {
-  console.log("Navigerer til login-siden");
   router.push("/");
 };
 </script>
-
 
 <template>
   <div class="auth-container">
@@ -51,17 +52,14 @@ const goToLogin = () => {
         <label for="email">Email:</label>
         <input type="email" v-model="email" required />
       </div>
-
       <div class="input-group">
         <label for="password">Adgangskode:</label>
         <input type="password" v-model="password" required />
       </div>
-
       <div class="input-group">
         <label for="confirmPassword">Bekræft adgangskode:</label>
         <input type="password" v-model="confirmPassword" required />
       </div>
-
       <button type="submit" class="btn">Opret bruger</button>
       <p @click="goToLogin" class="toggle-text">Har du allerede en konto? Log ind her.</p>
     </form>
@@ -69,7 +67,6 @@ const goToLogin = () => {
 </template>
 
 <style scoped>
-
 .auth-container {
   max-width: 400px;
   margin: 50px auto;
